@@ -40,7 +40,7 @@ const csrfProtection = csrf({
   cookie: {
     httpOnly: true,
     secure: true,
-    sameSite: 'lax' // Change to 'lax' for compatibility
+    sameSite: 'lax'
   }
 });
 
@@ -136,6 +136,7 @@ app.post('/register', async (req, res) => {
 });
 
 app.post('/logout', csrfProtection, (req, res) => {
+  console.log('Received CSRF token in header:', req.headers['csrf-token']);
   const cookieOptions = {
     httpOnly: true,
     secure: true,
