@@ -10,7 +10,7 @@ require('dotenv').config();
 
 const app = express();
 
-const connectionString = `postgres://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}?sslmode=require`;
+const connectionString = `postgresql://neondb_owner:npg_wIQqnb1JY9xZ@ep-long-term-a4x6exiv-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require`;
 const pool = new Pool({
   connectionString: connectionString,
   ssl: {
