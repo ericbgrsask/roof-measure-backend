@@ -36,14 +36,7 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
-const csrfProtection = csrf({
-  cookie: {
-    key: '_csrf',
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax'
-  }
-});
+const csrfProtection = csrf({ cookie: false }); // Disable cookie storage for CSRF token
 
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -69,7 +62,9 @@ const authenticateToken = (req, res, next) => {
 };
 
 app.get('/csrf-token', csrfProtection, (req, res) => {
-  res.json({ csrfToken: req.csrfToken() });
+  const token = req.csrfToken();
+  console.log('Generated CSRF token:', token);
+  res.json({ csrfToken: token });
 });
 
 app.post('/login', async (req, res) => {
@@ -137,9 +132,8 @@ app.post('/register', async (req, res) => {
 });
 
 app.post('/logout', csrfProtection, (req, res) => {
-  console.log('Received CSRF token in header:', req.headers['csrf-token']);
-  console.log('Received X-CSRF-Token in header:', req.headers['x-csrf-token']);
-  console.log('CSRF token cookie:', req.cookies['_csrf']);
+  console.log('Received CSRF token in header:', req.headers['x-csrf-token']);
+  console.log('Received X-XSRF-Token in header:', req.headers['x-xsrf-token']);
   const cookieOptions = {
     httpOnly: true,
     secure: true,
