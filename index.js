@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const csrf = require('csurf');
 require('dotenv').config();
 
 const app = express();
@@ -18,24 +19,24 @@ const pool = new Pool({
   }
 });
 
-// Allow requests from both localhost (for testing) and the deployed frontend
 const allowedOrigins = ['http://localhost:3000', 'https://roof-measure-frontend.onrender.com'];
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (e.g., mobile apps or curl requests)
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
       const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
       return callback(new Error(msg), false);
     }
-    return callback(null, origin); // Reflect the request origin
+    return callback(null, origin);
   },
-  credentials: true // Allow credentials (cookies)
+  credentials: true
 }));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
+
+const csrfProtection = csrf({ cookie: true });
 
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -59,6 +60,10 @@ const authenticateToken = (req, res, next) => {
     res.status(403).json({ error: 'Invalid token.' });
   }
 };
+
+app.get('/csrf-token', csrfProtection, (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
+});
 
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
@@ -85,7 +90,7 @@ app.post('/login', async (req, res) => {
     const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
     res.cookie('token', token, {
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production', // Secure only in production
       sameSite: 'strict',
       maxAge: 3600000
     });
@@ -110,6 +115,7 @@ app.post('/register', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    console.log('Registering user - Username:', username, 'Hashed Password:', hashedPassword);
     const result = await pool.query(
       'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id',
       [username, hashedPassword]
@@ -121,10 +127,10 @@ app.post('/register', async (req, res) => {
   }
 });
 
-app.post('/logout', (req, res) => {
+app.post('/logout', csrfProtection, (req, res) => {
   res.cookie('token', '', {
     httpOnly: true,
-    secure: true,
+    secure: process.env.NODE_ENV === 'production', // Secure only in production
     sameSite: 'strict',
     maxAge: 0
   });
@@ -142,7 +148,7 @@ app.get('/projects', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/projects', authenticateToken, async (req, res) => {
+app.post('/projects', authenticateToken, csrfProtection, async (req, res) => {
   const { address, polygons } = req.body;
   const userId = req.user.id;
   const result = await pool.query(
@@ -161,7 +167,7 @@ app.get('/projects/:id', authenticateToken, async (req, res) => {
   res.json(result.rows[0]);
 });
 
-app.post('/generate-pdf', authenticateToken, async (req, res) => {
+app.post('/generate-pdf', authenticateToken, csrfProtection, async (req, res) => {
   const { address, screenshot, polygons, areas, totalArea } = req.body;
 
   const doc = new PDFDocument({ margin: 50 });
