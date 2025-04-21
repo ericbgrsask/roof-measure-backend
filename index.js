@@ -39,7 +39,7 @@ app.use(cookieParser());
 
 // Set up session middleware
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'your-secret-key', // Use a secure secret in production
+  secret: process.env.SESSION_SECRET || 'your-secret-key',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -52,12 +52,18 @@ app.use(session({
 
 const csrfProtection = csrf({
   cookie: false,
-  value: (req) => req.headers['x-csrf-token']
+  value: (req) => {
+    const token = req.headers['x-csrf-token'];
+    console.log('CSRF token received for validation:', token);
+    console.log('Session CSRF secret:', req.session.csrfSecret);
+    return token;
+  }
 });
 
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   console.log('Request headers:', req.headers);
+  console.log('Session:', req.session);
   next();
 });
 
