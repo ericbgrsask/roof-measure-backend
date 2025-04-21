@@ -40,7 +40,7 @@ const csrfProtection = csrf({
   cookie: {
     httpOnly: true,
     secure: true,
-    sameSite: 'none'
+    sameSite: 'lax' // Change to 'lax' for compatibility
   }
 });
 
