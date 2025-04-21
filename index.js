@@ -7,6 +7,7 @@ const bcrypt = require('bcrypt');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const csrf = require('csurf');
+const session = require('express-session');
 require('dotenv').config();
 
 const app = express();
@@ -36,13 +37,22 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
+// Set up session middleware
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your-secret-key', // Use a secure secret in production
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
 const csrfProtection = csrf({
   cookie: false,
-  value: (req) => {
-    const token = req.headers['x-csrf-token'] || req.headers['x-xsrf-token'];
-    console.log('CSRF token received for validation:', token);
-    return token;
-  }
+  value: (req) => req.headers['x-csrf-token']
 });
 
 app.use((req, res, next) => {
@@ -141,7 +151,6 @@ app.post('/register', async (req, res) => {
 
 app.post('/logout', csrfProtection, (req, res) => {
   console.log('Received CSRF token in header:', req.headers['x-csrf-token']);
-  console.log('Received X-XSRF-Token in header:', req.headers['x-xsrf-token']);
   const cookieOptions = {
     httpOnly: true,
     secure: true,
