@@ -9,7 +9,7 @@ const cookieParser = require('cookie-parser');
 const csrf = require('csurf');
 require('dotenv').config();
 
-const app = express(); // Define app here
+const app = express();
 
 const connectionString = `postgresql://neondb_owner:npg_wIQqnb1JY9xZ@ep-long-term-a4x6exiv-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require`;
 const pool = new Pool({
@@ -145,7 +145,7 @@ app.get('/projects', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
     const result = await pool.query('SELECT id, address FROM projects WHERE user_id = $1', [userId]);
-    res.json(result.rows);
+    res.json(result.rows || []);
   } catch (error) {
     console.error('Error fetching projects:', error);
     res.status(500).json({ error: 'Server error fetching projects.' });
@@ -155,20 +155,30 @@ app.get('/projects', authenticateToken, async (req, res) => {
 app.post('/projects', authenticateToken, csrfProtection, async (req, res) => {
   const { address, polygons } = req.body;
   const userId = req.user.id;
-  const result = await pool.query(
-    'INSERT INTO projects (address, polygons, user_id) VALUES ($1, $2, $3) RETURNING id',
-    [address, JSON.stringify(polygons), userId]
-  );
-  res.json({ id: result.rows[0].id });
+  try {
+    const result = await pool.query(
+      'INSERT INTO projects (address, polygons, user_id) VALUES ($1, $2, $3) RETURNING id',
+      [address, JSON.stringify(polygons), userId]
+    );
+    res.json({ id: result.rows[0].id });
+  } catch (error) {
+    console.error('Error saving project:', error);
+    res.status(500).json({ error: 'Server error saving project.' });
+  }
 });
 
 app.get('/projects/:id', authenticateToken, async (req, res) => {
   const userId = req.user.id;
-  const result = await pool.query('SELECT * FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, userId]);
-  if (result.rows.length === 0) {
-    return res.status(404).json({ error: 'Project not found or access denied.' });
+  try {
+    const result = await pool.query('SELECT * FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, userId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Project not found or access denied.' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching project:', error);
+    res.status(500).json({ error: 'Server error fetching project.' });
   }
-  res.json(result.rows[0]);
 });
 
 app.post('/generate-pdf', authenticateToken, csrfProtection, async (req, res) => {
