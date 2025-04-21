@@ -5,39 +5,49 @@ const { createCanvas } = require('canvas');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
 const app = express();
 
-// Use a connection string with sslmode=require
 const connectionString = `postgres://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}?sslmode=require`;
 const pool = new Pool({
   connectionString: connectionString,
   ssl: {
-    rejectUnauthorized: false // Allow self-signed certificates
+    rejectUnauthorized: false
   }
 });
 
-// Enable CORS
-app.use(cors());
-app.use(express.json({ limit: '10mb' })); // Increase limit for image data
+// Allow requests from both localhost (for testing) and the deployed frontend
+const allowedOrigins = ['http://localhost:3000', 'https://roof-measure-frontend.onrender.com'];
 
-// Log all incoming requests
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g., mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, origin); // Reflect the request origin
+  },
+  credentials: true // Allow credentials (cookies)
+}));
+
+app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser());
+
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
 
-// Test route to confirm server is running
 app.get('/', (req, res) => res.send('Backend is running'));
 
-// JWT Secret Key from environment variable
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Middleware to verify JWT token
 const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+  const token = req.cookies.token;
 
   if (!token) return res.status(401).json({ error: 'Access denied. No token provided.' });
 
@@ -50,7 +60,6 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
-// Login endpoint
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
 
@@ -74,49 +83,77 @@ app.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
-    res.json({ token });
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'strict',
+      maxAge: 3600000
+    });
+    res.json({ message: 'Login successful' });
   } catch (error) {
     console.error('Error during login:', error);
     res.status(500).json({ error: 'Server error during login.' });
   }
 });
 
-// Hash passwords before storing (for initial setup or registration)
 app.post('/register', async (req, res) => {
   const { username, password } = req.body;
 
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required.' });
+  }
+
   try {
+    const existingUser = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    if (existingUser.rows.length > 0) {
+      return res.status(409).json({ error: 'Username already exists. Please choose a different username.' });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query(
       'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id',
       [username, hashedPassword]
     );
-    res.json({ id: result.rows[0].id });
+    res.json({ message: 'Registration successful', id: result.rows[0].id });
   } catch (error) {
     console.error('Error during registration:', error);
     res.status(500).json({ error: 'Server error during registration.' });
   }
 });
 
-// Protect the existing endpoints
+app.get('/projects', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await pool.query('SELECT id, address FROM projects WHERE user_id = $1', [userId]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching projects:', error);
+    res.status(500).json({ error: 'Server error fetching projects.' });
+  }
+});
+
 app.post('/projects', authenticateToken, async (req, res) => {
   const { address, polygons } = req.body;
+  const userId = req.user.id;
   const result = await pool.query(
-    'INSERT INTO projects (address, polygons) VALUES ($1, $2) RETURNING id',
-    [address, JSON.stringify(polygons)]
+    'INSERT INTO projects (address, polygons, user_id) VALUES ($1, $2, $3) RETURNING id',
+    [address, JSON.stringify(polygons), userId]
   );
   res.json({ id: result.rows[0].id });
 });
 
 app.get('/projects/:id', authenticateToken, async (req, res) => {
-  const result = await pool.query('SELECT * FROM projects WHERE id = $1', [req.params.id]);
+  const userId = req.user.id;
+  const result = await pool.query('SELECT * FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, userId]);
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Project not found or access denied.' });
+  }
   res.json(result.rows[0]);
 });
 
 app.post('/generate-pdf', authenticateToken, async (req, res) => {
   const { address, screenshot, polygons, areas, totalArea } = req.body;
 
-  // Create a new PDF document
   const doc = new PDFDocument({ margin: 50 });
   let buffers = [];
   doc.on('data', buffers.push.bind(buffers));
@@ -127,17 +164,14 @@ app.post('/generate-pdf', authenticateToken, async (req, res) => {
     res.send(pdfData);
   });
 
-  // Add header with company name and date
   doc.fontSize(20).font('Helvetica-Bold').text('Saskatoon Roof Measure Report', { align: 'center' });
   doc.fontSize(12).font('Helvetica').text(`Generated on: ${new Date().toLocaleDateString()}`, { align: 'center' });
   doc.moveDown(2);
 
-  // Add project address
   doc.fontSize(14).font('Helvetica-Bold').text('Project Address:', { underline: true });
   doc.fontSize(12).font('Helvetica').text(address || 'Not provided');
   doc.moveDown(1.5);
 
-  // Add the map screenshot
   if (screenshot) {
     try {
       const imgData = screenshot.replace(/^data:image\/png;base64,/, '');
@@ -153,7 +187,6 @@ app.post('/generate-pdf', authenticateToken, async (req, res) => {
     }
   }
 
-  // Add polygon coordinates section
   doc.fontSize(14).font('Helvetica-Bold').text('Polygon Coordinates:', { underline: true });
   doc.moveDown(0.5);
   polygons.forEach((poly, index) => {
@@ -165,7 +198,6 @@ app.post('/generate-pdf', authenticateToken, async (req, res) => {
   });
   doc.moveDown(1);
 
-  // Add area calculations section
   doc.fontSize(14).font('Helvetica-Bold').text('Area Calculations:', { underline: true });
   doc.moveDown(0.5);
   const tableTop = doc.y;
@@ -183,7 +215,6 @@ app.post('/generate-pdf', authenticateToken, async (req, res) => {
   doc.moveDown(1);
   doc.fontSize(12).font('Helvetica-Bold').text(`Total Flat Area: ${totalArea} SQFT`);
 
-  // Finalize the PDF
   doc.end();
 });
 
