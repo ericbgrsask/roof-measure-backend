@@ -38,6 +38,7 @@ app.use(cookieParser());
 
 const csrfProtection = csrf({
   cookie: {
+    key: '_csrf',
     httpOnly: true,
     secure: true,
     sameSite: 'lax'
@@ -137,6 +138,8 @@ app.post('/register', async (req, res) => {
 
 app.post('/logout', csrfProtection, (req, res) => {
   console.log('Received CSRF token in header:', req.headers['csrf-token']);
+  console.log('Received X-CSRF-Token in header:', req.headers['x-csrf-token']);
+  console.log('CSRF token cookie:', req.cookies['_csrf']);
   const cookieOptions = {
     httpOnly: true,
     secure: true,
