@@ -36,10 +36,18 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
-const csrfProtection = csrf({ cookie: false }); // Disable cookie storage for CSRF token
+const csrfProtection = csrf({
+  cookie: false,
+  value: (req) => {
+    const token = req.headers['x-csrf-token'] || req.headers['x-xsrf-token'];
+    console.log('CSRF token received for validation:', token);
+    return token;
+  }
+});
 
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log('Request headers:', req.headers);
   next();
 });
 
