@@ -9,13 +9,13 @@ require('dotenv').config();
 
 const app = express();
 
-// Define the PostgreSQL connection pool using environment variables
+// Use a connection string with sslmode=require
+const connectionString = `postgres://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}?sslmode=require`;
 const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
+  connectionString: connectionString,
+  ssl: {
+    rejectUnauthorized: false // Allow self-signed certificates
+  }
 });
 
 // Enable CORS
@@ -65,7 +65,6 @@ app.post('/login', async (req, res) => {
     }
 
     console.log('Stored hashed password:', user.password);
-    // Compare the provided password with the stored hashed password
     const validPassword = await bcrypt.compare(password, user.password);
     console.log('Password comparison result:', validPassword);
 
@@ -74,7 +73,6 @@ app.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Invalid username or password.' });
     }
 
-    // Generate a JWT token
     const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
     res.json({ token });
   } catch (error) {
@@ -189,6 +187,5 @@ app.post('/generate-pdf', authenticateToken, async (req, res) => {
   doc.end();
 });
 
-// Use PORT environment variable or default to 3000
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running on http://localhost:${port}`));
