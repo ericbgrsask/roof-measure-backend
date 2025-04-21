@@ -121,6 +121,16 @@ app.post('/register', async (req, res) => {
   }
 });
 
+app.post('/logout', (req, res) => {
+  res.cookie('token', '', {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    maxAge: 0
+  });
+  res.json({ message: 'Logout successful' });
+});
+
 app.get('/projects', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
