@@ -44,7 +44,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     secure: true,
-    sameSite: 'lax',
+    sameSite: 'none', // Allow cross-site cookies
     maxAge: 24 * 60 * 60 * 1000,
     path: '/'
   }
@@ -67,10 +67,10 @@ app.get('/', (req, res) => res.send('Backend is running'));
 const JWT_SECRET = process.env.JWT_SECRET;
 
 const authenticateToken = (req, res, next) => {
-  const token = req.cookies.token;
+  const token = req.session.token;
 
   if (!token) {
-    console.log('No token provided in cookies');
+    console.log('No token provided in session');
     return res.status(401).json({ error: 'Access denied. No token provided.' });
   }
 
@@ -116,15 +116,8 @@ app.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
-    const cookieOptions = {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'lax',
-      maxAge: 3600000,
-      path: '/'
-    };
-    res.cookie('token', token, cookieOptions);
-    console.log('Setting token cookie with options:', cookieOptions);
+    req.session.token = token; // Store token in session
+    console.log('Stored token in session:', req.session.token);
     res.json({ message: 'Login successful' });
   } catch (error) {
     console.error('Error during login:', error);
@@ -161,15 +154,8 @@ app.post('/register', async (req, res) => {
 app.post('/logout', csrfProtection, (req, res) => {
   console.log('Received CSRF token in header:', req.headers['x-csrf-token']);
   console.log('CSRF token in session:', req.session.csrfToken);
-  const cookieOptions = {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    maxAge: 0,
-    path: '/'
-  };
-  res.cookie('token', '', cookieOptions);
-  console.log('Clearing token cookie with options:', cookieOptions);
+  req.session.token = null; // Clear token from session
+  console.log('Cleared token from session');
   res.json({ message: 'Logout successful' });
 });
 
