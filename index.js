@@ -41,14 +41,9 @@ const csrfProtection = csrf({
     key: '_csrf',
     httpOnly: true,
     secure: true,
-    sameSite: 'lax' // Changed to 'lax' to avoid TypeError
+    sameSite: 'lax'
   },
-  value: (req) => {
-    const token = req.headers['x-csrf-token'];
-    console.log('CSRF token received for validation:', token);
-    console.log('CSRF token in cookie:', req.cookies['_csrf']);
-    return token;
-  }
+  value: (req) => req.headers['x-csrf-token']
 });
 
 app.use((req, res, next) => {
@@ -114,7 +109,8 @@ app.post('/login', async (req, res) => {
       httpOnly: true,
       secure: true,
       sameSite: 'lax',
-      maxAge: 3600000
+      maxAge: 3600000,
+      path: '/'
     };
     res.cookie('token', token, cookieOptions);
     console.log('Setting token cookie with options:', cookieOptions);
@@ -157,7 +153,8 @@ app.post('/logout', csrfProtection, (req, res) => {
     httpOnly: true,
     secure: true,
     sameSite: 'lax',
-    maxAge: 0
+    maxAge: 0,
+    path: '/'
   };
   res.cookie('token', '', cookieOptions);
   console.log('Clearing token cookie with options:', cookieOptions);
