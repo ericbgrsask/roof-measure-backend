@@ -41,7 +41,7 @@ const csrfProtection = csrf({
     key: '_csrf',
     httpOnly: true,
     secure: true,
-    sameSite: 'none'
+    sameSite: 'lax' // Changed to 'lax' to avoid TypeError
   },
   value: (req) => {
     const token = req.headers['x-csrf-token'];
@@ -65,13 +65,18 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const authenticateToken = (req, res, next) => {
   const token = req.cookies.token;
 
-  if (!token) return res.status(401).json({ error: 'Access denied. No token provided.' });
+  if (!token) {
+    console.log('No token provided in cookies');
+    return res.status(401).json({ error: 'Access denied. No token provided.' });
+  }
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('Token verified, user:', decoded);
     req.user = decoded;
     next();
   } catch (error) {
+    console.error('Token verification failed:', error);
     res.status(403).json({ error: 'Invalid token.' });
   }
 };
@@ -108,7 +113,7 @@ app.post('/login', async (req, res) => {
     const cookieOptions = {
       httpOnly: true,
       secure: true,
-      sameSite: 'none',
+      sameSite: 'lax',
       maxAge: 3600000
     };
     res.cookie('token', token, cookieOptions);
@@ -151,7 +156,7 @@ app.post('/logout', csrfProtection, (req, res) => {
   const cookieOptions = {
     httpOnly: true,
     secure: true,
-    sameSite: 'none',
+    sameSite: 'lax',
     maxAge: 0
   };
   res.cookie('token', '', cookieOptions);
