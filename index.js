@@ -41,7 +41,9 @@ const csrfProtection = csrf({
     key: '_csrf',
     httpOnly: true,
     secure: true,
-    sameSite: 'lax'
+    sameSite: 'lax',
+    path: '/',
+    domain: '.onrender.com' // Ensure the cookie is accessible across subdomains
   },
   value: (req) => req.headers['x-csrf-token']
 });
@@ -110,7 +112,8 @@ app.post('/login', async (req, res) => {
       secure: true,
       sameSite: 'lax',
       maxAge: 3600000,
-      path: '/'
+      path: '/',
+      domain: '.onrender.com'
     };
     res.cookie('token', token, cookieOptions);
     console.log('Setting token cookie with options:', cookieOptions);
@@ -154,7 +157,8 @@ app.post('/logout', csrfProtection, (req, res) => {
     secure: true,
     sameSite: 'lax',
     maxAge: 0,
-    path: '/'
+    path: '/',
+    domain: '.onrender.com'
   };
   res.cookie('token', '', cookieOptions);
   console.log('Clearing token cookie with options:', cookieOptions);
