@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const session = require('express-session');
 const csrf = require('csurf');
 require('dotenv').config();
 
@@ -36,22 +37,28 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
-const csrfProtection = csrf({
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  resave: false,
+  saveUninitialized: false,
   cookie: {
-    key: '_csrf',
     httpOnly: true,
     secure: true,
     sameSite: 'lax',
-    path: '/',
-    domain: '.onrender.com' // Ensure the cookie is accessible across subdomains
-  },
+    maxAge: 24 * 60 * 60 * 1000,
+    path: '/'
+  }
+}));
+
+const csrfProtection = csrf({
+  cookie: false,
   value: (req) => req.headers['x-csrf-token']
 });
 
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   console.log('Request headers:', req.headers);
-  console.log('Cookies:', req.cookies);
+  console.log('Session:', req.session);
   next();
 });
 
@@ -112,8 +119,7 @@ app.post('/login', async (req, res) => {
       secure: true,
       sameSite: 'lax',
       maxAge: 3600000,
-      path: '/',
-      domain: '.onrender.com'
+      path: '/'
     };
     res.cookie('token', token, cookieOptions);
     console.log('Setting token cookie with options:', cookieOptions);
@@ -157,8 +163,7 @@ app.post('/logout', csrfProtection, (req, res) => {
     secure: true,
     sameSite: 'lax',
     maxAge: 0,
-    path: '/',
-    domain: '.onrender.com'
+    path: '/'
   };
   res.cookie('token', '', cookieOptions);
   console.log('Clearing token cookie with options:', cookieOptions);
