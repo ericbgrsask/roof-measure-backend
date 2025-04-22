@@ -1,220 +1,5 @@
-const express = require('express');
-const { Pool } = require('pg');
-const PDFDocument = require('pdfkit');
-const { createCanvas } = require('canvas');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
-const cors = require('cors');
-const cookieParser = require('cookie-parser');
-const session = require('express-session');
-const csrf = require('csurf');
-require('dotenv').config();
-
-const app = express();
-
-const connectionString = `postgresql://neondb_owner:npg_wIQqnb1JY9xZ@ep-long-term-a4x6exiv-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require`;
-const pool = new Pool({
-  connectionString: connectionString,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
-
-const allowedOrigins = ['http://localhost:3000', 'https://roof-measure-frontend.onrender.com'];
-
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    }
-    return callback(null, origin);
-  },
-  credentials: true
-}));
-
-app.use(express.json({ limit: '10mb' }));
-app.use(cookieParser());
-
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'your-secret-key',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    maxAge: 24 * 60 * 60 * 1000,
-    path: '/'
-  }
-}));
-
-const csrfProtection = csrf({
-  cookie: false,
-  value: (req) => req.headers['x-csrf-token']
-});
-
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  console.log('Request headers:', req.headers);
-  console.log('Session:', req.session);
-  next();
-});
-
-app.get('/', (req, res) => res.send('Backend is running'));
-
-const JWT_SECRET = process.env.JWT_SECRET;
-
-const authenticateToken = (req, res, next) => {
-  const token = req.cookies.token;
-
-  if (!token) {
-    console.log('No token provided in cookies');
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
-  }
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    console.log('Token verified, user:', decoded);
-    req.user = decoded;
-    next();
-  } catch (error) {
-    console.error('Token verification failed:', error);
-    res.status(403).json({ error: 'Invalid token.' });
-  }
-};
-
-app.get('/csrf-token', csrfProtection, (req, res) => {
-  const token = req.csrfToken();
-  console.log('Generated CSRF token:', token);
-  req.session.csrfToken = token; // Store the CSRF token in the session
-  console.log('Stored CSRF token in session:', req.session.csrfToken);
-  res.json({ csrfToken: token });
-});
-
-app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-
-  try {
-    console.log('Login attempt for username:', username);
-    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-    const user = result.rows[0];
-
-    if (!user) {
-      console.log('User not found:', username);
-      return res.status(400).json({ error: 'Invalid username or password.' });
-    }
-
-    console.log('Stored hashed password:', user.password);
-    const validPassword = await bcrypt.compare(password, user.password);
-    console.log('Password comparison result:', validPassword);
-
-    if (!validPassword) {
-      console.log('Password mismatch for user:', username);
-      return res.status(400).json({ error: 'Invalid username or password.' });
-    }
-
-    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
-    const cookieOptions = {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'lax',
-      maxAge: 3600000,
-      path: '/'
-    };
-    res.cookie('token', token, cookieOptions);
-    console.log('Setting token cookie with options:', cookieOptions);
-    res.json({ message: 'Login successful' });
-  } catch (error) {
-    console.error('Error during login:', error);
-    res.status(500).json({ error: 'Server error during login.' });
-  }
-});
-
-app.post('/register', async (req, res) => {
-  const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password are required.' });
-  }
-
-  try {
-    const existingUser = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-    if (existingUser.rows.length > 0) {
-      return res.status(409).json({ error: 'Username already exists. Please choose a different username.' });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    console.log('Registering user - Username:', username, 'Hashed Password:', hashedPassword);
-    const result = await pool.query(
-      'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id',
-      [username, hashedPassword]
-    );
-    res.json({ message: 'Registration successful', id: result.rows[0].id });
-  } catch (error) {
-    console.error('Error during registration:', error);
-    res.status(500).json({ error: 'Server error during registration.' });
-  }
-});
-
-app.post('/logout', csrfProtection, (req, res) => {
-  console.log('Received CSRF token in header:', req.headers['x-csrf-token']);
-  console.log('CSRF token in session:', req.session.csrfToken);
-  const cookieOptions = {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    maxAge: 0,
-    path: '/'
-  };
-  res.cookie('token', '', cookieOptions);
-  console.log('Clearing token cookie with options:', cookieOptions);
-  res.json({ message: 'Logout successful' });
-});
-
-app.get('/projects', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const result = await pool.query('SELECT id, address FROM projects WHERE user_id = $1', [userId]);
-    res.json(result.rows || []);
-  } catch (error) {
-    console.error('Error fetching projects:', error);
-    res.status(500).json({ error: 'Server error fetching projects.' });
-  }
-});
-
-app.post('/projects', authenticateToken, csrfProtection, async (req, res) => {
-  const { address, polygons } = req.body;
-  const userId = req.user.id;
-  try {
-    const result = await pool.query(
-      'INSERT INTO projects (address, polygons, user_id) VALUES ($1, $2, $3) RETURNING id',
-      [address, JSON.stringify(polygons), userId]
-    );
-    res.json({ id: result.rows[0].id });
-  } catch (error) {
-    console.error('Error saving project:', error);
-    res.status(500).json({ error: 'Server error saving project.' });
-  }
-});
-
-app.get('/projects/:id', authenticateToken, async (req, res) => {
-  const userId = req.user.id;
-  try {
-    const result = await pool.query('SELECT * FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, userId]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Project not found or access denied.' });
-    }
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error fetching project:', error);
-    res.status(500).json({ error: 'Server error fetching project.' });
-  }
-});
-
 app.post('/generate-pdf', authenticateToken, csrfProtection, async (req, res) => {
-  const { address, screenshot, polygons, areas, totalArea } = req.body;
+  const { address, screenshot, polygons, pitches, areas, totalArea } = req.body;
 
   const doc = new PDFDocument({ margin: 50 });
   let buffers = [];
@@ -265,13 +50,16 @@ app.post('/generate-pdf', authenticateToken, csrfProtection, async (req, res) =>
   const tableTop = doc.y;
   const col1 = 50;
   const col2 = 150;
+  const col3 = 250;
   doc.fontSize(12).font('Helvetica-Bold').text('Section', col1, tableTop);
   doc.text('Area (SQFT)', col2, tableTop);
+  doc.text('Pitch', col3, tableTop);
   doc.moveDown(0.5);
   let yPosition = doc.y;
-  areas.forEach((area) => {
+  areas.forEach((area, index) => {
     doc.fontSize(10).font('Helvetica').text(area.section, col1, yPosition);
     doc.text(area.area, col2, yPosition);
+    doc.text(pitches[index] || 'N/A', col3, yPosition);
     yPosition += 15;
   });
   doc.moveDown(1);
@@ -279,6 +67,3 @@ app.post('/generate-pdf', authenticateToken, csrfProtection, async (req, res) =>
 
   doc.end();
 });
-
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Server running on http://localhost:${port}`));
