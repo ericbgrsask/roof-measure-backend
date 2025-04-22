@@ -88,6 +88,8 @@ const authenticateToken = (req, res, next) => {
 app.get('/csrf-token', csrfProtection, (req, res) => {
   const token = req.csrfToken();
   console.log('Generated CSRF token:', token);
+  req.session.csrfToken = token; // Store the CSRF token in the session
+  console.log('Stored CSRF token in session:', req.session.csrfToken);
   res.json({ csrfToken: token });
 });
 
@@ -158,6 +160,7 @@ app.post('/register', async (req, res) => {
 
 app.post('/logout', csrfProtection, (req, res) => {
   console.log('Received CSRF token in header:', req.headers['x-csrf-token']);
+  console.log('CSRF token in session:', req.session.csrfToken);
   const cookieOptions = {
     httpOnly: true,
     secure: true,
