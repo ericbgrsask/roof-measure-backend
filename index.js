@@ -5,7 +5,7 @@ const { createCanvas } = require('canvas');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
-const csrf = require('csurf');
+const crypto = require('crypto'); // Add for manual CSRF token generation
 require('dotenv').config();
 
 const app = express();
@@ -33,11 +33,6 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: '10mb' }));
-
-const csrfProtection = csrf({
-  cookie: false,
-  value: (req) => req.headers['x-csrf-token']
-});
 
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -69,11 +64,36 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
-app.get('/csrf-token', csrfProtection, (req, res) => {
-  const token = req.csrfToken();
-  console.log('Generated CSRF token:', token);
+// Manual CSRF token generation
+const generateCsrfToken = () => {
+  return crypto.randomBytes(32).toString('hex');
+};
+
+// Store CSRF tokens in memory (in production, use a database or Redis)
+const csrfTokens = new Map();
+
+app.get('/csrf-token', (req, res) => {
+  const token = generateCsrfToken();
+  const userId = req.headers['user-id'] || 'anonymous'; // Use user ID if available
+  csrfTokens.set(userId, token);
+  console.log(`Generated CSRF token for user ${userId}: ${token}`);
   res.json({ csrfToken: token });
 });
+
+// Middleware to verify CSRF token
+const verifyCsrfToken = (req, res, next) => {
+  const userId = req.user ? req.user.id.toString() : 'anonymous';
+  const receivedToken = req.headers['x-csrf-token'];
+  const storedToken = csrfTokens.get(userId);
+
+  if (!receivedToken || receivedToken !== storedToken) {
+    console.log('CSRF token verification failed:', { receivedToken, storedToken });
+    return res.status(403).json({ error: 'Invalid CSRF token' });
+  }
+
+  console.log('CSRF token verified successfully');
+  next();
+};
 
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
@@ -98,8 +118,8 @@ app.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
-    console.log('Sending login response with token:', token); // Add logging
-    res.json({ message: 'Login successful', token: token }); // Ensure token is sent as a named property
+    console.log('Sending login response with token:', token);
+    res.json({ message: 'Login successful', token: token });
   } catch (error) {
     console.error('Error during login:', error);
     res.status(500).json({ error: 'Server error during login.' });
@@ -132,7 +152,7 @@ app.post('/register', async (req, res) => {
   }
 });
 
-app.post('/logout', csrfProtection, authenticateToken, (req, res) => {
+app.post('/logout', verifyCsrfToken, authenticateToken, (req, res) => {
   console.log('Received CSRF token in header:', req.headers['x-csrf-token']);
   res.json({ message: 'Logout successful' });
 });
@@ -148,7 +168,7 @@ app.get('/projects', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/projects', authenticateToken, csrfProtection, async (req, res) => {
+app.post('/projects', verifyCsrfToken, authenticateToken, async (req, res) => {
   const { address, polygons, pitches } = req.body;
   const userId = req.user.id;
   try {
@@ -177,7 +197,7 @@ app.get('/projects/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/generate-pdf', authenticateToken, csrfProtection, async (req, res) => {
+app.post('/generate-pdf', verifyCsrfToken, authenticateToken, async (req, res) => {
   const { address, screenshot, polygons, pitches, areas, totalArea } = req.body;
 
   const doc = new PDFDocument({ margin: 50 });
