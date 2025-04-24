@@ -1,58 +1,31 @@
-app.post('/generate-pdf', verifyCsrfToken, authenticateToken, async (req, res) => {
-  const { address, screenshot, polygons, pitches, areas, totalArea } = req.body;
+app.post('/login', async (req, res) => {
+  const { username, password } = req.body;
 
-  const doc = new PDFDocument({ margin: 50 });
-  let buffers = [];
-  doc.on('data', buffers.push.bind(buffers));
-  doc.on('end', () => {
-    const pdfData = Buffer.concat(buffers);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename=roof-measure-report.pdf');
-    res.send(pdfData);
-  });
+  try {
+    console.log('Login attempt for username:', username);
+    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    console.log('Database query result:', result.rows);
+    const user = result.rows[0];
 
-  doc.fontSize(20).font('Helvetica-Bold').text('Saskatoon Roof Measure Report', { align: 'center' });
-  doc.fontSize(12).font('Helvetica').text(`Generated on: ${new Date().toLocaleDateString()}`, { align: 'center' });
-  doc.moveDown(2);
-
-  doc.fontSize(14).font('Helvetica-Bold').text('Project Address:', { underline: true });
-  doc.fontSize(12).font('Helvetica').text(address || 'Not provided');
-  doc.moveDown(1.5);
-
-  if (screenshot) {
-    try {
-      const imgData = screenshot.replace(/^data:image\/png;base64,/, '');
-      const imgBuffer = Buffer.from(imgData, 'base64');
-      doc.fontSize(14).font('Helvetica-Bold').text('Map Overview:', { underline: true });
-      doc.moveDown(0.5);
-      doc.image(imgBuffer, { fit: [500, 300], align: 'center' });
-      doc.moveDown(1.5);
-    } catch (error) {
-      console.error('Error adding screenshot to PDF:', error);
-      doc.fontSize(12).text('Unable to include map screenshot.', { align: 'center' });
-      doc.moveDown(1.5);
+    if (!user) {
+      console.log('User not found:', username);
+      return res.status(400).json({ error: 'Invalid username or password.' });
     }
+
+    console.log('Stored hashed password:', user.password);
+    const validPassword = await bcrypt.compare(password, user.password);
+    console.log('Password comparison result:', validPassword);
+
+    if (!validPassword) {
+      console.log('Password mismatch for user:', username);
+      return res.status(400).json({ error: 'Invalid username or password.' });
+    }
+
+    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
+    console.log('Sending login response with token:', token);
+    res.json({ message: 'Login successful', token: token });
+  } catch (error) {
+    console.error('Error during login:', error);
+    res.status(500).json({ error: 'Server error during login.' });
   }
-
-  doc.fontSize(14).font('Helvetica-Bold').text('Area Calculations:', { underline: true });
-  doc.moveDown(0.5);
-  const tableTop = doc.y;
-  const col1 = 50;
-  const col2 = 150;
-  const col3 = 250;
-  doc.fontSize(12).font('Helvetica-Bold').text('Section', col1, tableTop);
-  doc.text('Area (SQFT)', col2, tableTop);
-  doc.text('Pitch', col3, tableTop);
-  doc.moveDown(0.5);
-  let yPosition = doc.y;
-  areas.forEach((area, index) => {
-    doc.fontSize(10).font('Helvetica').text(area.section, col1, yPosition);
-    doc.text(area.area, col2, yPosition);
-    doc.text(pitches[index] || 'N/A', col3, yPosition);
-    yPosition += 15;
-  });
-  doc.moveDown(1);
-  doc.fontSize(12).font('Helvetica-Bold').text(`Total Flat Area: ${totalArea} SQFT`);
-
-  doc.end();
 });
